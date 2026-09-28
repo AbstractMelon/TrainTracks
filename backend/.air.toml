@@ -1,0 +1,22 @@
+# API process. Run alone with `make api`, or together with the ingestor via
+# `make dev`. The ingestor has its own config: .air.ingestor.toml.
+root = "."
+tmp_dir = "tmp/api"
+
+[build]
+cmd = "go build -o ./tmp/api/api ./cmd/api"
+bin = "./tmp/api/api"
+include_ext = ["go", "mod"]
+exclude_dir = ["tmp", "migrations", ".git", "testdata"]
+# The API does not compile the ingestion pipeline; changes there must not
+# restart it. Shared packages (models, geo, storage, config) still do.
+exclude_regex = ["_test.go", "internal/(adapters|tracking|estimation|ingestor)/", "cmd/ingestor/"]
+delay = 800
+stop_on_error = true
+log = "tmp/api/air.log"
+
+[log]
+time = true
+
+[misc]
+clean_on_exit = true

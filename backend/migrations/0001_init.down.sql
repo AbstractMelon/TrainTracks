@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS trip_delay_predictions;
+DROP TABLE IF EXISTS train_observations;
+DROP TABLE IF EXISTS junctions;
+DROP TABLE IF EXISTS track_segment_routes;
+DROP TABLE IF EXISTS track_segments;
+DROP TABLE IF EXISTS trip_stops;
+DROP TABLE IF EXISTS trips;
+DROP TABLE IF EXISTS stations;
+DROP TABLE IF EXISTS routes;
+DROP TABLE IF EXISTS agencies;
+DROP EXTENSION IF EXISTS postgis;

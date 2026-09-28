@@ -1,0 +1,386 @@
+openapi: 3.0.3
+info:
+  title: TrainTracks API
+  description: >-
+    Public read-only transit real-time API. No auth; IP rate-limited. Provenance
+    is part of the contract: every position carries `type`
+    (ACTUAL | ESTIMATED | STALE | UNKNOWN) and `source`
+    (`uta-gtfs-rt` | `estimation-engine`).
+  version: 1.0.0
+servers:
+  - url: /api/v1
+paths:
+  /agencies:
+    get:
+      summary: List transit agencies
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agencies:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Agency"
+  /agencies/{id}:
+    get:
+      summary: Get an agency
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agency"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /routes:
+    get:
+      summary: List routes
+      parameters:
+        - name: agency
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  routes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Route"
+  /routes/{id}:
+    get:
+      summary: Get a route (geometry + ordered stations)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Route"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /stations:
+    get:
+      summary: List stations
+      parameters:
+        - name: agency
+          in: query
+          schema:
+            type: string
+        - name: q
+          in: query
+          description: Name search
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Station"
+  /stations/{id}:
+    get:
+      summary: Get a station (routes + upcoming arrivals)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Station"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /trains:
+    get:
+      summary: List live trains
+      parameters:
+        - name: bbox
+          in: query
+          description: minLon,minLat,maxLon,maxLat
+          schema:
+            type: string
+        - name: agency
+          in: query
+          schema:
+            type: string
+        - name: route
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [ACTUAL, ESTIMATED, STALE, UNKNOWN]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trains:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Train"
+  /trains/{id}:
+    get:
+      summary: Get a train
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Train"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /tracks:
+    get:
+      summary: Tracks as GeoJSON within a bbox (near-static)
+      parameters:
+        - name: bbox
+          in: query
+          required: true
+          schema:
+            type: string
+          description: minLon,minLat,maxLon,maxLat
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackCollection"
+  /search:
+    get:
+      summary: Unified search across stations and routes
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Station"
+                  routes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Route"
+  /status:
+    get:
+      summary: Per-agency/adapter ingestion health
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ingestors:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IngestionHealth"
+  /live:
+    get:
+      summary: SSE stream of train updates (snapshot + diffs + heartbeat)
+      parameters:
+        - name: bbox
+          in: query
+          schema:
+            type: string
+          description: minLon,minLat,maxLon,maxLat
+        - name: agency
+          in: query
+          schema:
+            type: string
+        - name: route
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: text/event-stream
+  /openapi.json:
+    get:
+      summary: This specification
+      responses:
+        "200":
+          description: OK
+components:
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+  schemas:
+    Agency:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        website: { type: string }
+        gtfs_static_url: { type: string }
+        gtfs_rt_url: { type: string }
+        timezone: { type: string }
+        license_note: { type: string }
+    Route:
+      type: object
+      properties:
+        id: { type: string }
+        agency_id: { type: string }
+        gtfs_route_id: { type: string }
+        short_name: { type: string }
+        long_name: { type: string }
+        mode: { type: string }
+        color: { type: string }
+        stations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Station"
+        geometry: { type: object }
+    Station:
+      type: object
+      properties:
+        id: { type: string }
+        agency_id: { type: string }
+        gtfs_stop_id: { type: string }
+        name: { type: string }
+        lat: { type: number }
+        lon: { type: number }
+        routes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Route"
+        next_arrivals:
+          type: array
+          items:
+            $ref: "#/components/schemas/Arrival"
+    Arrival:
+      type: object
+      properties:
+        train_id: { type: string }
+        route_id: { type: string }
+        headsign: { type: string }
+        scheduled_at: { type: string, format: date-time }
+        predicted_at: { type: string, format: date-time }
+        delay_seconds: { type: integer }
+    Train:
+      type: object
+      properties:
+        id: { type: string }
+        agency: { type: string }
+        route:
+          type: object
+          properties:
+            id: { type: string }
+            short_name: { type: string }
+            mode: { type: string }
+        destination: { type: string }
+        position:
+          $ref: "#/components/schemas/Position"
+        current_station:
+          $ref: "#/components/schemas/StationRef"
+        next_station:
+          $ref: "#/components/schemas/StationRef"
+        delay_seconds: { type: integer }
+    Position:
+      type: object
+      required: [lat, lon, type, source, confidence, last_actual_at, updated_at]
+      properties:
+        lat: { type: number }
+        lon: { type: number }
+        heading: { type: number }
+        speed_mph: { type: number }
+        type:
+          type: string
+          enum: [ACTUAL, ESTIMATED, STALE, UNKNOWN]
+        source: { type: string }
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        last_actual_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    StationRef:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+    IngestionHealth:
+      type: object
+      properties:
+        adapter: { type: string }
+        state:
+          type: string
+          enum: [starting, healthy, degraded, open]
+        last_fetch_at: { type: string, format: date-time }
+        last_success_at: { type: string, format: date-time }
+        last_error: { type: string }
+        consecutive_failures: { type: integer }
+        circuit_open: { type: boolean }
+        observations_total: { type: integer }
+    TrackCollection:
+      type: object
+      properties:
+        type: { type: string }
+        features:
+          type: array
+          items: { type: object }

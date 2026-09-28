@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-traintracks}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-traintracks}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-traintracks}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: {context: ../backend, dockerfile: Dockerfile}
+    command: ["/usr/local/bin/migrate", "up"]
+    environment: &backend_env
+      POSTGRES_URL: postgres://${POSTGRES_USER:-traintracks}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-traintracks}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  ingestor:
+    build: {context: ../backend, dockerfile: Dockerfile}
+    command: ["/usr/local/bin/ingestor"]
+    environment:
+      <<: *backend_env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    restart: unless-stopped
+
+  api:
+    build: {context: ../backend, dockerfile: Dockerfile}
+    command: ["/usr/local/bin/api"]
+    environment:
+      <<: *backend_env
+      API_ADDR: ":8080"
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-120}
+      SSE_MAX_CONN_PER_IP: ${SSE_MAX_CONN_PER_IP:-3}
+      CORS_ALLOWED_ORIGIN: "${CORS_ALLOWED_ORIGIN:-*}"
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-18080}:8080"
+
+  frontend:
+    build: {context: ../frontend, dockerfile: Dockerfile}
+    environment:
+      PUBLIC_API_BASE: ${PUBLIC_API_BASE:-/api/v1}
+    depends_on:
+      api: {condition: service_started}
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-13000}:3000"
+
+volumes:
+  pgdata:
+  redisdata:

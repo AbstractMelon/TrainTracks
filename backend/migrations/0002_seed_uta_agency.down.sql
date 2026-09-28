@@ -1,0 +1,1 @@
+DELETE FROM agencies WHERE id = 'uta';

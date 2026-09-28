@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS route_shapes;
+DROP TABLE IF EXISTS shapes;

@@ -1,0 +1,20 @@
+# Backend
+backend/bin/
+backend/tmp/
+backend/*.test
+backend/*.out
+
+# Frontend
+frontend/node_modules/
+frontend/build/
+frontend/.svelte-kit/
+frontend/.vite/
+
+# Env
+.env
+.env.local
+
+# Misc
+*.log
+.DS_Store
+logs

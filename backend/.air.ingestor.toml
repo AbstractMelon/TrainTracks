@@ -1,0 +1,22 @@
+# Ingestor process. Run alone with `make ingestor`, or together with the API
+# via `make dev`. The API has its own config: .air.toml.
+root = "."
+tmp_dir = "tmp/ingestor"
+
+[build]
+cmd = "go build -o ./tmp/ingestor/ingestor ./cmd/ingestor"
+bin = "./tmp/ingestor/ingestor"
+include_ext = ["go", "mod"]
+exclude_dir = ["tmp", "migrations", ".git", "testdata"]
+# The ingestor does not compile the API; changes there must not restart it.
+# Shared packages (models, geo, storage, config) still do.
+exclude_regex = ["_test.go", "internal/api/", "cmd/api/"]
+delay = 800
+stop_on_error = true
+log = "tmp/ingestor/air.log"
+
+[log]
+time = true
+
+[misc]
+clean_on_exit = true
