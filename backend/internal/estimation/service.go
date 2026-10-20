@@ -84,9 +84,19 @@ func (s *Service) Sweep(ctx context.Context) error {
 		}
 		stale := make([]models.TrainState, 0, len(states))
 		for _, st := range states {
-			if now.Sub(st.LastActualAt) > s.cfg.FreshWindow {
-				stale = append(stale, st)
+			age := now.Sub(st.LastActualAt)
+			if age <= s.cfg.FreshWindow {
+				continue
 			}
+			// UNKNOWN is terminal: Evaluate has no newer answer for that train,
+			// and rewriting the state would only refresh StateTTL every tick,
+			// pinning a dead train's marker to the map forever. The write that
+			// marks it UNKNOWN is the last, so the key lapses StateTTL later and
+			// the marker is pruned.
+			if st.PositionType == models.PositionUnknown {
+				continue
+			}
+			stale = append(stale, st)
 		}
 		if len(stale) == 0 {
 			continue

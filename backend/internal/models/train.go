@@ -65,5 +65,11 @@ type TrainState struct {
 	PositionSource    string       `json:"position_source"`
 	Confidence        *float64     `json:"confidence,omitempty"`
 	LastActualAt      time.Time    `json:"last_actual_at"`
-	LastUpdateAt      time.Time    `json:"last_update_at"`
+	// LastActualLat/Lon anchor estimation at the last real observation.
+	// Sweeps rewrite Lat/Lon in place, so projecting from those would add
+	// another speed*age on top of the previous estimate every tick. Zero
+	// until the first ACTUAL report for the train.
+	LastActualLat float64   `json:"last_actual_lat,omitempty"`
+	LastActualLon float64   `json:"last_actual_lon,omitempty"`
+	LastUpdateAt  time.Time `json:"last_update_at"`
 }

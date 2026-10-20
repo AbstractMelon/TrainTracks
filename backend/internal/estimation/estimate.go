@@ -114,9 +114,10 @@ type Output struct {
 // UNKNOWN rather than erroring.
 func Evaluate(in Input) Output {
 	st := in.State
+	aLat, aLon, hasActual := lastActual(st)
 	out := Output{
-		Lat:              st.Lat,
-		Lon:              st.Lon,
+		Lat:              aLat,
+		Lon:              aLon,
 		PositionType:     models.PositionEstimated,
 		CurrentStationID: st.CurrentStationID,
 		NextStationID:    st.NextStationID,
@@ -141,8 +142,11 @@ func Evaluate(in Input) Output {
 		out.NextStationID = strPtr(in.Trips.Next.StationID)
 
 	case in.SpeedEstimate > 0:
-		lat, lon := deadReckon(st, in.SpeedEstimate, in.Age)
-		out.Lat, out.Lon = lat, lon
+		// Without a known observation to project from, hold: estimating from
+		// the previous estimate would compound the projection every sweep.
+		if hasActual {
+			out.Lat, out.Lon = deadReckon(aLat, aLon, st.Heading, in.SpeedEstimate, in.Age)
+		}
 		out.Confidence = fptr(DeadReckonConfidence(in.Age, in.FreshWindow, in.MaxWindow))
 		out.Reason = ReasonDeadReckoning
 
@@ -156,8 +160,20 @@ func Evaluate(in Input) Output {
 		out.PositionType = models.PositionUnknown
 		out.Confidence = nil
 		out.Reason = ReasonUnknown
+		out.Lat, out.Lon = aLat, aLon // last real sighting, not the projection just rejected
 	}
 	return out
+}
+
+// lastActual is the position of the last real observation and whether one is
+// known. States written before the anchor existed fall back to their own
+// coordinates only when those are an ACTUAL report: an earlier estimate is not
+// an anchor, so callers hold instead of projecting from it.
+func lastActual(st models.TrainState) (lat, lon float64, ok bool) {
+	if st.LastActualLat != 0 || st.LastActualLon != 0 {
+		return st.LastActualLat, st.LastActualLon, true
+	}
+	return st.Lat, st.Lon, st.PositionType == models.PositionActual
 }
 
 // interpolateBetweenStops places the train between the bracketing stops at the
@@ -209,31 +225,26 @@ func pathLength(path []models.Point) float64 {
 	return total
 }
 
-// deadReckon projects the last known position forward by speed over age,
-// clamped to a plausible max speed. Uses heading when known.
-func deadReckon(st models.TrainState, speed float64, age time.Duration) (float64, float64) {
+// deadReckon projects the last actual position forward by speed over age,
+// clamped to a plausible max speed, along the reported heading. Without a
+// usable heading there is no direction to travel in, so the position holds:
+// falling back to zero would drift every heading-less train due north.
+func deadReckon(lat, lon float64, heading *float64, speed float64, age time.Duration) (float64, float64) {
 	elapsed := age.Seconds()
-	if speed <= 0 || elapsed <= 0 {
-		return st.Lat, st.Lon
+	if speed <= 0 || elapsed <= 0 || heading == nil || *heading < 0 {
+		return lat, lon
 	}
 	dist := geo.DistanceAtSpeedMeters(speed, elapsed, MaxHeadingSpeedMps*elapsed)
 	if dist <= 0 {
-		return st.Lat, st.Lon
-	}
-	if (st.Heading == nil || *st.Heading < 0) && st.NextStationID == nil {
-		return st.Lat, st.Lon
+		return lat, lon
 	}
 
-	heading := 0.0
-	if st.Heading != nil && *st.Heading >= 0 {
-		heading = *st.Heading
-	}
 	// Destination point given bearing + distance (spherical approximation,
 	// fine for sub-kilometer projections).
 	d := dist / earthRadiusM
-	φ1 := st.Lat * degToRad
-	λ1 := st.Lon * degToRad
-	θ := heading * degToRad
+	φ1 := lat * degToRad
+	λ1 := lon * degToRad
+	θ := *heading * degToRad
 	φ2 := math.Asin(math.Sin(φ1)*math.Cos(d) + math.Cos(φ1)*math.Sin(d)*math.Cos(θ))
 	λ2 := λ1 + math.Atan2(math.Sin(θ)*math.Sin(d)*math.Cos(φ1), math.Cos(d)-math.Sin(φ1)*math.Sin(φ2))
 	return φ2 * radToDeg, normalizeLon(λ2 * radToDeg)

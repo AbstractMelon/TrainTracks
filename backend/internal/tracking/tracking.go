@@ -54,6 +54,8 @@ func (e *Engine) Process(ctx context.Context, obs Observation) error {
 	st.PositionType = models.PositionActual
 	st.PositionSource = obs.Source
 	st.LastActualAt = obs.Timestamp
+	st.LastActualLat = obs.Lat
+	st.LastActualLon = obs.Lon
 	st.LastUpdateAt = obs.ObservedAt
 
 	e.log.Debug("train actual", "train", st.TrainID, "lat", st.Lat, "lon", st.Lon)

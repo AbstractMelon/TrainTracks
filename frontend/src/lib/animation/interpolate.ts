@@ -1,4 +1,4 @@
-import { lerp } from '$lib/geo';
+import { haversineMeters, lerp } from '$lib/geo';
 
 /**
  * Client-side interpolation (SPEC.md §12.2): the server pushes discrete
@@ -53,6 +53,22 @@ const DEFAULT_GLIDE_MS = 30_000;
  */
 const MAX_OVERRUN_MS = 15_000;
 
+/**
+ * Ceiling for marker motion (~90 mph, above the backend's dead-reckoning cap
+ * of ~80 mph, so real estimates never trip it). A move faster than this is a
+ * correction rather than travel: the train reappeared somewhere new, or a bad
+ * estimate was replaced.
+ */
+const MAX_ANIMATE_MPS = 40;
+
+/** A move of `dLat`/`dLon` degrees over `ms` milliseconds, expressed as m/s. */
+function speedMps(dLat: number, dLon: number, refLat: number, ms: number): number {
+	if (ms <= 0) return Infinity;
+	const mLat = dLat * 110_540;
+	const mLon = dLon * 111_320 * Math.cos((refLat * Math.PI) / 180);
+	return (Math.hypot(mLat, mLon) * 1000) / ms;
+}
+
 /** Clamps a measured update interval into a usable glide window. */
 export function glideDuration(intervalMs: number): number {
 	if (intervalMs < MIN_GLIDE_MS) return MIN_GLIDE_MS;
@@ -79,27 +95,42 @@ export function glidePosition(g: Glide, now: number): { lat: number; lon: number
  * marker currently is, so consecutive updates never jump, and lasts about as
  * long as the previous gap between updates so trains keep moving at the speed
  * the feed reports them at. That reported speed is carried as a coast, used
- * when the window closes before the next update lands. STALE/UNKNOWN positions
- * settle immediately (`from` equals `to`, no coast) instead of animating, per
- * SPEC.md §12.2.
+ * when the window closes before the next update lands. Two guards keep bad
+ * data from looking like motion: an update farther than the marker could have
+ * travelled inside the window settles at once instead of flying across the
+ * map, and the coast is capped at a speed the vehicle could actually do, since
+ * the gap it is measured over also carries whatever correction the glide
+ * absorbed. STALE/UNKNOWN positions settle immediately (`from` equals `to`, no
+ * coast) instead of animating, per SPEC.md §12.2.
  */
 export function startGlide(prev: Glide | undefined, to: AnimatedTrainPoint, now: number): Glide {
 	const animatable = shouldAnimate(to.type);
 	const from = prev && animatable ? glidePosition(prev, now) : { lat: to.lat, lon: to.lon };
 	const gapMs = prev ? now - prev.startAt : 0;
+	const durationMs = prev ? glideDuration(gapMs) : DEFAULT_GLIDE_MS;
+
+	const corrected = haversineMeters(from.lat, from.lon, to.lat, to.lon) > MAX_ANIMATE_MPS * (durationMs / 1000);
+	const start = corrected ? { lat: to.lat, lon: to.lon } : from;
+
 	let vLat = 0;
 	let vLon = 0;
-	if (animatable && prev && gapMs > 0) {
+	if (animatable && !corrected && prev && gapMs > 0) {
 		vLat = (to.lat - prev.toLat) / gapMs;
 		vLon = (to.lon - prev.toLon) / gapMs;
+		const mps = speedMps(to.lat - prev.toLat, to.lon - prev.toLon, to.lat, gapMs);
+		if (mps > MAX_ANIMATE_MPS) {
+			const k = MAX_ANIMATE_MPS / mps;
+			vLat *= k;
+			vLon *= k;
+		}
 	}
 	return {
-		fromLat: from.lat,
-		fromLon: from.lon,
+		fromLat: start.lat,
+		fromLon: start.lon,
 		toLat: to.lat,
 		toLon: to.lon,
 		startAt: now,
-		durationMs: prev ? glideDuration(gapMs) : DEFAULT_GLIDE_MS,
+		durationMs,
 		vLat,
 		vLon
 	};

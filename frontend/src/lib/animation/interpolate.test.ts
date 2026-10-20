@@ -11,7 +11,10 @@ import {
 } from './interpolate';
 
 const actual = { lat: 40.7, lon: -111.8, type: 'ACTUAL' as const, confidence: null };
-const est = { lat: 40.75, lon: -111.85, type: 'ESTIMATED' as const, confidence: 0.6 };
+// ~280m from `actual`, a real move over one update gap: startGlide treats a
+// move faster than a vehicle could travel as a correction, so fixtures have to
+// be plausible for the glide behaviour under test to be what runs.
+const est = { lat: 40.702, lon: -111.798, type: 'ESTIMATED' as const, confidence: 0.6 };
 
 describe('fraction', () => {
 	it('clamps into [0,1]', () => {
@@ -102,8 +105,8 @@ describe('startGlide', () => {
 		const first = startGlide(undefined, actual, 0);
 		const second = startGlide(first, est, 10_000);
 
-		expect(second.vLat).toBeCloseTo(0.05 / 10_000, 12);
-		expect(second.vLon).toBeCloseTo(-0.05 / 10_000, 12);
+		expect(second.vLat).toBeCloseTo(0.002 / 10_000, 12);
+		expect(second.vLon).toBeCloseTo(0.002 / 10_000, 12);
 		// Past the window it keeps travelling instead of parking on the target.
 		expect(glidePosition(second, 25_000).lat).toBeGreaterThan(est.lat);
 	});
@@ -128,6 +131,41 @@ describe('startGlide', () => {
 		expect(g.vLon).toBe(0);
 		expect(glidePosition(g, 60_000)).toEqual({ lat: stale.lat, lon: stale.lon });
 	});
+
+	it('settles a move no vehicle could have travelled instead of flying to it', () => {
+		const first = startGlide(undefined, actual, 0);
+		const far = { lat: 40.9, lon: -111.6, type: 'ACTUAL' as const, confidence: null };
+		const g = startGlide(first, far, 30_000);
+
+		expect(g.fromLat).toBe(far.lat);
+		expect(g.fromLon).toBe(far.lon);
+		expect(g.vLat).toBe(0);
+		expect(g.vLon).toBe(0);
+		expect(glidePosition(g, 120_000)).toEqual({ lat: far.lat, lon: far.lon });
+	});
+
+	it('caps the coast at a speed the vehicle could do', () => {
+		const runaway: Glide = {
+			fromLat: 40.7,
+			fromLon: -111.8,
+			toLat: 40.7,
+			toLon: -111.8,
+			startAt: 0,
+			durationMs: 1_000,
+			vLat: 0.00001,
+			vLon: 0 // coasted ~4.4km past its target before the next update lands
+		};
+		const marker = glidePosition(runaway, 5_000);
+		const g = startGlide(runaway, { ...actual, lat: marker.lat, lon: marker.lon }, 5_000);
+
+		// The update lands on the marker, so there is no correction to settle;
+		// the gap still carries the runaway coast, which the cap must absorb.
+		const gapMs = 5_000;
+		const mps =
+			(Math.hypot(g.vLat * 110_540, g.vLon * 111_320 * Math.cos((40.7 * Math.PI) / 180)) * 1000) / gapMs;
+		expect(mps).toBeGreaterThan(0);
+		expect(mps).toBeLessThanOrEqual(40);
+	});
 });
 
 // Regression test for the feed cadence: positions land in a burst every 30s,
@@ -141,7 +179,7 @@ describe('update bursts', () => {
 
 		for (let t = 0; t <= 90_000; t += 16) {
 			if (t > 0 && t % 30_000 === 0) {
-				target = { ...target, lat: target.lat + 0.05, lon: target.lon + 0.05 };
+				target = { ...target, lat: target.lat + 0.005, lon: target.lon + 0.005 };
 				glide = startGlide(glide, target, t);
 			}
 			const point = glidePosition(glide, t);
@@ -152,7 +190,7 @@ describe('update bursts', () => {
 			prevLat = point.lat;
 		}
 
-		expect(midGlide).toBeCloseTo(40.725, 3);
+		expect(midGlide).toBeCloseTo(40.7025, 3);
 	});
 });
 

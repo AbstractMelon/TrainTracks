@@ -152,6 +152,8 @@ func TestEvaluateDeadReckoning(t *testing.T) {
 	speed := 10.0
 	st := models.TrainState{
 		TrainID: "uta:2", Lat: 40.0, Lon: -111.0,
+		PositionType: models.PositionActual, PositionSource: "uta-gtfs-rt",
+		LastActualLat: 40.0, LastActualLon: -111.0,
 		Heading: &heading, Speed: &speed,
 		LastActualAt: time.Now().Add(-2 * time.Minute),
 	}
@@ -170,6 +172,96 @@ func TestEvaluateDeadReckoning(t *testing.T) {
 	}
 	if out.Confidence == nil || *out.Confidence <= 0 {
 		t.Errorf("confidence = %v, want positive", out.Confidence)
+	}
+}
+
+// Regression: the sweep rewrites Lat/Lon every tick, so a projection measured
+// from the previous projection compounds and the train flies off the map.
+func TestEvaluateDeadReckoningDoesNotCompound(t *testing.T) {
+	heading := 90.0
+	st := models.TrainState{
+		TrainID: "uta:2", Lat: 40.0, Lon: -111.0,
+		PositionType:  models.PositionActual,
+		LastActualLat: 40.0, LastActualLon: -111.0,
+		Heading:      &heading,
+		LastActualAt: time.Now().Add(-2 * time.Minute),
+	}
+	in := Input{
+		State: st, Age: 2 * time.Minute, SpeedEstimate: 20,
+		FreshWindow: fresh, MaxWindow: maxW, MinConfidence: models.MinConfidence,
+	}
+	first := Evaluate(in)
+
+	// The service writes the output back and re-evaluates from the anchor:
+	// repeating the sweep must land on the same point, not step past it.
+	st.Lat, st.Lon = first.Lat, first.Lon
+	st.PositionType = first.PositionType
+	in.State = st
+	second := Evaluate(in)
+
+	if second.Lat != first.Lat || second.Lon != first.Lon {
+		t.Errorf("projection compounded: %v,%v then %v,%v",
+			first.Lat, first.Lon, second.Lat, second.Lon)
+	}
+}
+
+func TestEvaluateHoldsEstimateWithoutAnchor(t *testing.T) {
+	// A state written before the anchor existed carries an estimate, not an
+	// observation: dead reckoning must hold rather than project from it.
+	heading := 90.0
+	st := models.TrainState{
+		TrainID: "uta:2", Lat: 40.5, Lon: -110.0,
+		PositionType: models.PositionEstimated, PositionSource: "estimation-engine",
+		Heading:      &heading,
+		LastActualAt: time.Now().Add(-2 * time.Minute),
+	}
+	out := Evaluate(Input{
+		State: st, Age: 2 * time.Minute, SpeedEstimate: 20,
+		FreshWindow: fresh, MaxWindow: maxW, MinConfidence: models.MinConfidence,
+	})
+	if out.Lat != st.Lat || out.Lon != st.Lon {
+		t.Errorf("position = %v,%v, want held at %v,%v", out.Lat, out.Lon, st.Lat, st.Lon)
+	}
+	if out.PositionType != models.PositionEstimated {
+		t.Errorf("type = %v, want ESTIMATED", out.PositionType)
+	}
+}
+
+func TestEvaluateDeadReckoningNeedsHeading(t *testing.T) {
+	next := "uta:b"
+	st := models.TrainState{
+		TrainID: "uta:2", Lat: 40.0, Lon: -111.0,
+		PositionType:  models.PositionActual,
+		LastActualLat: 40.0, LastActualLon: -111.0,
+		NextStationID: &next, // no heading: nothing to project along
+		LastActualAt:  time.Now().Add(-time.Minute),
+	}
+	out := Evaluate(Input{
+		State: st, Age: time.Minute, SpeedEstimate: 20,
+		FreshWindow: fresh, MaxWindow: maxW, MinConfidence: models.MinConfidence,
+	})
+	if out.Lat != st.LastActualLat || out.Lon != st.LastActualLon {
+		t.Errorf("position = %v,%v, want held at the last actual %v,%v",
+			out.Lat, out.Lon, st.LastActualLat, st.LastActualLon)
+	}
+}
+
+func TestEvaluateUnknownReturnsLastActual(t *testing.T) {
+	st := models.TrainState{
+		TrainID: "uta:4", Lat: 36.0, Lon: -111.0, // where a runaway estimate ended up
+		PositionType:  models.PositionEstimated,
+		LastActualLat: 40.7, LastActualLon: -111.8,
+		LastActualAt: time.Now().Add(-maxW - time.Minute),
+	}
+	out := Evaluate(Input{
+		State: st, Age: maxW + time.Minute, SpeedEstimate: 20,
+		FreshWindow: fresh, MaxWindow: maxW, MinConfidence: models.MinConfidence,
+	})
+	if out.PositionType != models.PositionUnknown {
+		t.Errorf("type = %v, want UNKNOWN", out.PositionType)
+	}
+	if out.Lat != 40.7 || out.Lon != -111.8 {
+		t.Errorf("position = %v,%v, want last actual 40.7,-111.8", out.Lat, out.Lon)
 	}
 }
 
