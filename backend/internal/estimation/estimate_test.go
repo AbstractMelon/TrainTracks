@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"traintracks/internal/geo"
 	"traintracks/internal/models"
 )
 
@@ -166,9 +167,9 @@ func TestEvaluateDeadReckoning(t *testing.T) {
 	if out.PositionType != models.PositionEstimated {
 		t.Errorf("type = %v, want ESTIMATED", out.PositionType)
 	}
-	// Moving east at ~10 m/s for 120s ≈ 1200m ≈ 0.0108 longitude deg at lat 40.
-	if out.Lon <= -111.0 {
-		t.Errorf("lon = %v, want > previous lon (east movement)", out.Lon)
+	// East at 10 m/s for 120s would be 1200m, past the projection cap.
+	if d := geo.HaversineMeters(st.LastActualLat, st.LastActualLon, out.Lat, out.Lon); d > MaxDeadReckonMeters+1 {
+		t.Errorf("projection = %.0fm from the sighting, want at most the %.0fm cap", d, MaxDeadReckonMeters)
 	}
 	if out.Confidence == nil || *out.Confidence <= 0 {
 		t.Errorf("confidence = %v, want positive", out.Confidence)
@@ -243,6 +244,32 @@ func TestEvaluateDeadReckoningNeedsHeading(t *testing.T) {
 	if out.Lat != st.LastActualLat || out.Lon != st.LastActualLon {
 		t.Errorf("position = %v,%v, want held at the last actual %v,%v",
 			out.Lat, out.Lon, st.LastActualLat, st.LastActualLon)
+	}
+}
+
+// A silent vehicle keeps being swept for minutes: past the cap the estimate
+// parks instead of walking off the rails on a straight line.
+func TestEvaluateDeadReckoningStopsAtCap(t *testing.T) {
+	heading := 90.0
+	st := models.TrainState{
+		TrainID: "uta:2", Lat: 40.0, Lon: -111.0,
+		PositionType:  models.PositionActual,
+		LastActualLat: 40.0, LastActualLon: -111.0,
+		Heading:      &heading,
+		LastActualAt: time.Now().Add(-5 * time.Minute),
+	}
+	in := Input{
+		State: st, Age: 5 * time.Minute, SpeedEstimate: 30, // asks for 9000m of travel
+		FreshWindow: fresh, MaxWindow: maxW, MinConfidence: models.MinConfidence,
+	}
+	first := Evaluate(in)
+	if d := geo.HaversineMeters(st.LastActualLat, st.LastActualLon, first.Lat, first.Lon); d > MaxDeadReckonMeters+1 {
+		t.Errorf("projection = %.0fm from the sighting, want at most the %.0fm cap", d, MaxDeadReckonMeters)
+	}
+	in.Age += 30 * time.Second
+	second := Evaluate(in)
+	if second.Lat != first.Lat || second.Lon != first.Lon {
+		t.Errorf("parked estimate kept moving: %v,%v then %v,%v", first.Lat, first.Lon, second.Lat, second.Lon)
 	}
 }
 

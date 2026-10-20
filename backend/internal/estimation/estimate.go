@@ -20,9 +20,11 @@ const (
 	ReasonUnknown       = "unknown"
 )
 
-// MaxHeadingSpeedMps caps dead-reckoning projections (~80 mph, plausible top
-// speed for light rail / commuter rail).
-const MaxHeadingSpeedMps = 36.0
+// MaxDeadReckonMeters bounds how far a projection may carry a vehicle from its
+// last sighting. Past that, rails and roads curve and a straight-line
+// extrapolation has drifted off them, so the estimate stops advancing and the
+// marker parks where the train was last actually seen.
+const MaxDeadReckonMeters = 800.0
 
 // BracketingStop is one of the two stops bracketing "now" along a trip.
 type BracketingStop struct {
@@ -225,16 +227,16 @@ func pathLength(path []models.Point) float64 {
 	return total
 }
 
-// deadReckon projects the last actual position forward by speed over age,
-// clamped to a plausible max speed, along the reported heading. Without a
-// usable heading there is no direction to travel in, so the position holds:
-// falling back to zero would drift every heading-less train due north.
+// deadReckon projects the last actual position forward by speed over age along
+// the reported heading, stopping at MaxDeadReckonMeters from the sighting.
+// Without a usable heading there is no direction to travel in, so the position
+// holds: falling back to zero would drift every heading-less train due north.
 func deadReckon(lat, lon float64, heading *float64, speed float64, age time.Duration) (float64, float64) {
 	elapsed := age.Seconds()
 	if speed <= 0 || elapsed <= 0 || heading == nil || *heading < 0 {
 		return lat, lon
 	}
-	dist := geo.DistanceAtSpeedMeters(speed, elapsed, MaxHeadingSpeedMps*elapsed)
+	dist := geo.DistanceAtSpeedMeters(speed, elapsed, MaxDeadReckonMeters)
 	if dist <= 0 {
 		return lat, lon
 	}

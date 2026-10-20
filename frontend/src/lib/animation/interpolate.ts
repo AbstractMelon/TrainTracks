@@ -54,10 +54,9 @@ const DEFAULT_GLIDE_MS = 30_000;
 const MAX_OVERRUN_MS = 15_000;
 
 /**
- * Ceiling for marker motion (~90 mph, above the backend's dead-reckoning cap
- * of ~80 mph, so real estimates never trip it). A move faster than this is a
- * correction rather than travel: the train reappeared somewhere new, or a bad
- * estimate was replaced.
+ * Ceiling for marker motion (~90 mph, more than these vehicles do between
+ * updates). A move faster than this is a correction rather than travel: the
+ * train reappeared somewhere new, or a bad estimate was replaced.
  */
 const MAX_ANIMATE_MPS = 40;
 
